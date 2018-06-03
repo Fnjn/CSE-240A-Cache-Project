@@ -197,6 +197,7 @@ main(int argc, char *argv[])
 {
   // Set defaults
   set_defaults();
+    printf("hello world");
 
   // Process cmdline Arguments
   for (int i = 1; i < argc; ++i) {

@@ -7,6 +7,8 @@
 //========================================================//
 
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "cache.h"
 
 //
@@ -60,9 +62,9 @@ uint64_t l2cachePenalties; // L2$ penalties
 //TODO: Add your Cache data structures here
 //
 
-uint8_t **icache;
-uint8_t **dcache;
-uint8_t **l2cache;
+uint32_t **icache;
+uint32_t **dcache;
+uint32_t **l2cache;
 
 uint32_t offset_size;
 uint32_t offset_mask;
@@ -93,31 +95,27 @@ init_cache()
   l2cacheMisses     = 0;
   l2cachePenalties  = 0;
 
-  //
-  //TODO: Initialize Cache Simulator Data Structures
-  //
-
-  icache = (uint8_t**)malloc(sizeof(uint8_t*) * icacheSets);
-  dcache = (uint8_t**)malloc(sizeof(uint8_t*) * dcacheSets);
-  l2cache = (uint8_t**)malloc(sizeof(uint8_t*) * l2cacheSets);
+  icache = (uint32_t**)malloc(sizeof(uint32_t*) * icacheSets);
+  dcache = (uint32_t**)malloc(sizeof(uint32_t*) * dcacheSets);
+  l2cache = (uint32_t**)malloc(sizeof(uint32_t*) * l2cacheSets);
 
   for(int i=0; i<icacheSets; i++)
   {
-    icache[i] = (uint8_t*)malloc(sizeof(uint8_t) * icacheAssoc);
+    icache[i] = (uint32_t*)malloc(sizeof(uint32_t) * icacheAssoc);
     for(int j=0; j<icacheAssoc; j++)
       icache[i][j] = 0;
     }
 
   for(int i=0; i<dcacheSets; i++)
   {
-    dcache[i] = (uint8_t*)malloc(sizeof(uint8_t) * dcacheAssoc);
+    dcache[i] = (uint32_t*)malloc(sizeof(uint32_t) * dcacheAssoc);
     for(int j=0; j<dcacheAssoc; j++)
       dcache[i][j] = 0;
     }
 
   for(int i=0; i<l2cacheSets; i++)
   {
-    l2cache[i] = (uint8_t*)malloc(sizeof(uint8_t) * l2cacheAssoc);
+    l2cache[i] = (uint32_t*)malloc(sizeof(uint32_t) * l2cacheAssoc);
     for(int j=0; j<l2cacheAssoc; j++)
       l2cache[i][j] = 0;
     }
@@ -132,19 +130,26 @@ init_cache()
 uint32_t
 icache_access(uint32_t addr)
 {
-  //
-  //TODO: Implement I$
-  //
+  icacheRefs += 1;
+
   uint32_t index_mask = (1 << icacheSets) - 1;
   uint32_t offset = addr & offset_mask;
   uint32_t index = (addr >> offset_size) & index_mask;
   uint32_t tag = addr >> (icacheSets + offset_size);
 
-  for(int i=0; i<icacheAssoc; i++)
-    if(icache[index][i] == tag)
+  for(int i=0; i<icacheAssoc; i++){
+    if(icache[index][i] == tag){ // Hit
       return icacheHitTime;
+    }
+  }
 
-  return l2cache_access(addr) + icacheHitTime;
+  icacheMisses += 1;
+  icache[index][rand()%icacheAssoc] = tag;
+
+  uint32_t penalty = l2cache_access(addr);
+  icachePenalties += penalty;
+
+  return penalty + icacheHitTime;
 }
 
 // Perform a memory access through the dcache interface for the address 'addr'
@@ -153,18 +158,26 @@ icache_access(uint32_t addr)
 uint32_t
 dcache_access(uint32_t addr)
 {
-  //
-  //TODO: Implement D$
+  dcacheRefs += 1;
+
   uint32_t index_mask = (1 << dcacheSets) - 1;
   uint32_t offset = addr & offset_mask;
   uint32_t index = (addr >> offset_size) & index_mask;
   uint32_t tag = addr >> (dcacheSets + offset_size);
 
-  for(int i=0; i<dcacheAssoc; i++)
-    if(dcache[index][i] == tag)
+  for(int i=0; i<dcacheAssoc; i++){
+    if(dcache[index][i] == tag){ // Hit
       return dcacheHitTime;
+    }
+  }
 
-  return l2cache_access(addr) + dcacheHitTime;
+  dcacheMisses += 1;
+  dcache[index][rand()%dcacheAssoc] = tag;
+
+  uint32_t penalty = l2cache_access(addr);
+  dcachePenalties += penalty;
+
+  return penalty + dcacheHitTime;
 }
 
 // Perform a memory access to the l2cache for the address 'addr'
@@ -173,8 +186,22 @@ dcache_access(uint32_t addr)
 uint32_t
 l2cache_access(uint32_t addr)
 {
-  //
-  //TODO: Implement L2$
-  //
-  return memspeed;
+  l2cacheRefs += 1;
+
+  uint32_t index_mask = (1 << dcacheSets) - 1;
+  uint32_t offset = addr & offset_mask;
+  uint32_t index = (addr >> offset_size) & index_mask;
+  uint32_t tag = addr >> (l2cacheSets + offset_size);
+
+  for(int i=0; i<l2cacheAssoc; i++){
+    if(l2cache[index][i] == tag){ // Hit
+      return l2cacheHitTime;
+    }
+  }
+
+  l2cacheMisses += 1;
+  l2cache[index][rand()%l2cacheAssoc] = tag;
+
+  l2cachePenalties += memspeed;
+  return memspeed + l2cacheHitTime;
 }
