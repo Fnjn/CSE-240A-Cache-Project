@@ -6,14 +6,15 @@
 //  described in the README                               //
 //========================================================//
 
+#include <math.h>
 #include "cache.h"
 
 //
 // TODO:Student Information
 //
-const char *studentName = "NAME";
-const char *studentID   = "PID";
-const char *email       = "EMAIL";
+const char *studentName = "Fanjin Zeng";
+const char *studentID   = "A53238021";
+const char *email       = "f1zeng@ucsd.edu";
 
 //------------------------------------//
 //        Cache Configuration         //
@@ -59,6 +60,19 @@ uint64_t l2cachePenalties; // L2$ penalties
 //TODO: Add your Cache data structures here
 //
 
+uint8_t **icache;
+uint8_t **dcache;
+uint8_t **l2cache;
+
+uint32_t offset_size;
+uint32_t offset_mask;
+uint32_t index_mask;
+
+// int log2(int n)
+// {
+//   return log(n) / log(2);
+// }
+
 //------------------------------------//
 //          Cache Functions           //
 //------------------------------------//
@@ -78,10 +92,38 @@ init_cache()
   l2cacheRefs       = 0;
   l2cacheMisses     = 0;
   l2cachePenalties  = 0;
-  
+
   //
   //TODO: Initialize Cache Simulator Data Structures
   //
+
+  icache = (uint8_t**)malloc(sizeof(uint8_t*) * icacheSets);
+  dcache = (uint8_t**)malloc(sizeof(uint8_t*) * dcacheSets);
+  l2cache = (uint8_t**)malloc(sizeof(uint8_t*) * l2cacheSets);
+
+  for(int i=0; i<icacheSets; i++)
+  {
+    icache[i] = (uint8_t*)malloc(sizeof(uint8_t) * icacheAssoc);
+    for(int j=0; j<icacheAssoc; j++)
+      icache[i][j] = 0;
+    }
+
+  for(int i=0; i<dcacheSets; i++)
+  {
+    dcache[i] = (uint8_t*)malloc(sizeof(uint8_t) * dcacheAssoc);
+    for(int j=0; j<dcacheAssoc; j++)
+      dcache[i][j] = 0;
+    }
+
+  for(int i=0; i<l2cacheSets; i++)
+  {
+    l2cache[i] = (uint8_t*)malloc(sizeof(uint8_t) * l2cacheAssoc);
+    for(int j=0; j<l2cacheAssoc; j++)
+      l2cache[i][j] = 0;
+    }
+
+    offset_size = (uint32_t)log2(blocksize);
+    offset_mask = (1 << offset_size) - 1;
 }
 
 // Perform a memory access through the icache interface for the address 'addr'
@@ -93,7 +135,16 @@ icache_access(uint32_t addr)
   //
   //TODO: Implement I$
   //
-  return memspeed;
+  uint32_t index_mask = (1 << icacheSets) - 1;
+  uint32_t offset = addr & offset_mask;
+  uint32_t index = (addr >> offset_size) & index_mask;
+  uint32_t tag = addr >> (icacheSets + offset_size);
+
+  for(int i=0; i<icacheAssoc; i++)
+    if(icache[index][i] == tag)
+      return icacheHitTime;
+
+  return l2cache_access(addr) + icacheHitTime;
 }
 
 // Perform a memory access through the dcache interface for the address 'addr'
@@ -104,8 +155,16 @@ dcache_access(uint32_t addr)
 {
   //
   //TODO: Implement D$
-  //
-  return memspeed;
+  uint32_t index_mask = (1 << dcacheSets) - 1;
+  uint32_t offset = addr & offset_mask;
+  uint32_t index = (addr >> offset_size) & index_mask;
+  uint32_t tag = addr >> (dcacheSets + offset_size);
+
+  for(int i=0; i<dcacheAssoc; i++)
+    if(dcache[index][i] == tag)
+      return dcacheHitTime;
+
+  return l2cache_access(addr) + dcacheHitTime;
 }
 
 // Perform a memory access to the l2cache for the address 'addr'

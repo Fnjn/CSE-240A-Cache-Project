@@ -178,7 +178,7 @@ set_defaults()
 // Reads a line from the input stream and extracts the
 // Address and where the mem access should be directed to (I$ or D$)
 //
-// Returns True if Successful 
+// Returns True if Successful
 //
 int
 read_mem_access(uint32_t *addr, char *i_or_d)
