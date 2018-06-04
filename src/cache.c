@@ -62,9 +62,95 @@ uint64_t l2cachePenalties; // L2$ penalties
 //TODO: Add your Cache data structures here
 //
 
-uint32_t **icache;
-uint32_t **dcache;
-uint32_t **l2cache;
+typedef struct Block
+{
+  struct Block *prev, *next;
+  uint32_t val;
+}Block;
+
+typedef struct Set
+{
+  uint32_t size;
+  Block *front, *back;
+}Set;
+
+Block* createBlock(uint32_t val)
+{
+  Block *b = (Block*)malloc(sizeof(Block));
+  b->val = val;
+  b->prev = NULL;
+  b->next = NULL;
+
+  return b;
+}
+
+void setPush(Set* s,  Block *b)
+{
+  if(s->size)
+  {
+    b->prev = s->back;
+    s->back = b;
+  }
+  else
+  {
+    s->front = b;
+    s->back = b;
+  }
+  (s->size)++;
+}
+
+void setPop(Set* s){
+  if(!s->size)
+    return;
+
+  Block *p = s->front;
+  s->front = p->next;
+
+  if(s->front)
+    s->front->prev = NULL;
+
+  (s->size)--;
+  free(p);
+}
+
+Block* setPopIndex(Set* s, int index){
+  if(index > s->size)
+    return NULL;
+
+  Block *p = s->front;
+
+  if(s->size == 1){
+    s->front = NULL;
+    s->back = NULL;
+  }
+  else if (index == 0)
+  {
+    s->front = p->next;
+    s->front->prev = NULL;
+  }
+  else if (index == s->size - 1)
+  {
+    p = s->back;
+    s->back = s->back->prev;
+    s->back->next = NULL;
+  }
+  else{
+    for(int i=0; i<index; i++)
+      p = p->next;
+    p->prev->next = p->next;
+    p->next->prev = p->prev;
+  }
+
+  p->next = NULL;
+  p->prev = NULL;
+
+  (s->size)--;
+  return p;
+}
+
+Set *icache;
+Set *dcache;
+Set *l2cache;
 
 uint32_t offset_size;
 uint32_t offset_mask;
@@ -90,6 +176,7 @@ uint32_t l2cache_tag_mask;
 //          Cache Functions           //
 //------------------------------------//
 
+
 // Initialize the Cache Hierarchy
 //
 void
@@ -106,30 +193,30 @@ init_cache()
   l2cacheMisses     = 0;
   l2cachePenalties  = 0;
 
-  icache = (uint32_t**)malloc(sizeof(uint32_t*) * icacheSets);
-  dcache = (uint32_t**)malloc(sizeof(uint32_t*) * dcacheSets);
-  l2cache = (uint32_t**)malloc(sizeof(uint32_t*) * l2cacheSets);
+  icache = (Set*)malloc(sizeof(Set) * icacheSets);
+  dcache = (Set*)malloc(sizeof(Set) * dcacheSets);
+  l2cache = (Set*)malloc(sizeof(Set) * l2cacheSets);
 
   for(int i=0; i<icacheSets; i++)
   {
-    icache[i] = (uint32_t*)malloc(sizeof(uint32_t) * icacheAssoc);
-    for(int j=0; j<icacheAssoc; j++)
-      icache[i][j] = 0;
-    }
+    icache[i].size = 0;
+    icache[i].front = NULL;
+    icache[i].back = NULL;
+  }
 
   for(int i=0; i<dcacheSets; i++)
   {
-    dcache[i] = (uint32_t*)malloc(sizeof(uint32_t) * dcacheAssoc);
-    for(int j=0; j<dcacheAssoc; j++)
-      dcache[i][j] = 0;
-    }
+    dcache[i].size = 0;
+    dcache[i].front = NULL;
+    dcache[i].back = NULL;
+  }
 
   for(int i=0; i<l2cacheSets; i++)
   {
-    l2cache[i] = (uint32_t*)malloc(sizeof(uint32_t) * l2cacheAssoc);
-    for(int j=0; j<l2cacheAssoc; j++)
-      l2cache[i][j] = 0;
-    }
+    l2cache[i].size = 0;
+    l2cache[i].front = NULL;
+    l2cache[i].back = NULL;
+  }
 
     offset_size = (uint32_t)log2(blocksize);
     offset_mask = (1 << offset_size) - 1;
@@ -163,17 +250,26 @@ uint32_t icache_access(uint32_t addr)
   uint32_t index = (addr & icache_index_mask) >> offset_size;
   uint32_t tag = addr >> (icacheSets + offset_size);
 
-  for(int i=0; i<icacheAssoc; i++){
-    if((icache[index][i] & icache_tag_mask) == tag){ // Hit
+  Block *p = icache[index].front;
 
+  for(int i=0; i<icache[index].size; i++){
+    if((p->val & icache_tag_mask) == tag){ // Hit
+      Block *b = setPopIndex(&icache[index], i); // Get the hit block
+      setPush(&icache[index],  b); // move to end of set queue
       return icacheHitTime;
     }
+    p = p->next;
   }
 
   icacheMisses += 1;
 
-  // Miss replacement
-  icache[index][rand()%icacheAssoc] = tag;
+  // icache[index][rand()%icacheAssoc] = tag; // random replacement
+  // Miss replacement - LRU
+  Block *b = createBlock(tag);
+
+  if(icache[index].size == icacheAssoc) // set filled, replace LRU (front of set queue)
+    setPop(&icache[index]);
+  setPush(&icache[index],  b);
 
   uint32_t penalty = l2cache_access(addr);
   icachePenalties += penalty;
@@ -192,14 +288,26 @@ uint32_t dcache_access(uint32_t addr)
   uint32_t index = (addr & dcache_index_mask) >> offset_size;
   uint32_t tag = addr >> (dcacheSets + offset_size);
 
-  for(int i=0; i<dcacheAssoc; i++){
-    if((dcache[index][i] & dcache_tag_mask) == tag){ // Hit
+  Block *p = dcache[index].front;
+
+  for(int i=0; i<dcache[index].size; i++){
+    if((p->val & dcache_tag_mask) == tag){ // Hit
+      Block *b = setPopIndex(&dcache[index], i); // Get the hit block
+      setPush(&dcache[index],  b); // move to end of set queue
       return dcacheHitTime;
     }
+    p = p->next;
   }
 
   dcacheMisses += 1;
-  dcache[index][rand()%dcacheAssoc] = tag;
+
+  // dcache[index][rand()%icacheAssoc] = tag; // random replacement
+  // Miss replacement - LRU
+  Block *b = createBlock(tag);
+
+  if(dcache[index].size == dcacheAssoc) // set filled, replace LRU (front of set queue)
+    setPop(&dcache[index]);
+  setPush(&dcache[index],  b);
 
   uint32_t penalty = l2cache_access(addr);
   dcachePenalties += penalty;
@@ -219,14 +327,27 @@ l2cache_access(uint32_t addr)
   uint32_t index = (addr & l2cache_index_mask) >> offset_size;
   uint32_t tag = addr >> (l2cacheSets + offset_size);
 
-  for(int i=0; i<l2cacheAssoc; i++){
-    if((l2cache[index][i] & l2cache_tag_mask) == tag){ // Hit
+  Block *p = l2cache[index].front;
+
+  for(int i=0; i<l2cache[index].size; i++){
+    if((p->val & l2cache_tag_mask) == tag){ // Hit
+      Block *b = setPopIndex(&l2cache[index], i); // Get the hit block
+      setPush(&l2cache[index],  b); // move to end of set queue
       return l2cacheHitTime;
     }
+    p = p->next;
   }
 
   l2cacheMisses += 1;
-  l2cache[index][rand()%l2cacheAssoc] = tag;
+
+  // l2cache[index][rand()%icacheAssoc] = tag; // random replacement
+  // Miss replacement - LRU
+  Block *b = createBlock(tag);
+
+  printf("%d", l2cache[index].size);
+  if(l2cache[index].size == l2cacheAssoc) // set filled, replace LRU (front of set queue)
+    setPop(&l2cache[index]);
+  setPush(&l2cache[index],  b);
 
   l2cachePenalties += memspeed;
   return memspeed + l2cacheHitTime;
