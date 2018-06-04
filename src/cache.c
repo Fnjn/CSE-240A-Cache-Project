@@ -88,6 +88,7 @@ void setPush(Set* s,  Block *b)
 {
   if(s->size)
   {
+    s->back->next = b;
     b->prev = s->back;
     s->back = b;
   }
@@ -163,15 +164,6 @@ uint32_t icache_index_size;
 uint32_t dcache_index_size;
 uint32_t l2cache_index_size;
 
-uint32_t icache_tag_size;
-uint32_t dcache_tag_size;
-uint32_t l2cache_tag_size;
-
-uint32_t icache_tag_mask;
-uint32_t dcache_tag_mask;
-uint32_t l2cache_tag_mask;
-
-
 //------------------------------------//
 //          Cache Functions           //
 //------------------------------------//
@@ -229,14 +221,6 @@ init_cache()
     icache_index_mask = ((1 << icache_index_size) - 1) << offset_size;
     dcache_index_mask = ((1 << dcache_index_size) - 1) << offset_size;
     l2cache_index_mask = ((1 << l2cache_index_size) - 1) << offset_size;
-
-    icache_tag_size = 32 - icache_index_size - offset_size;
-    dcache_tag_size = 32 - dcache_index_size - offset_size;
-    l2cache_tag_size = 32 - l2cache_index_size - offset_size;
-
-    icache_tag_mask = (1 << icache_tag_size) - 1;
-    dcache_tag_mask = (1 << dcache_tag_size) - 1;
-    l2cache_tag_mask = (1 << l2cache_tag_size) - 1;
 }
 
 // Perform a memory access through the icache interface for the address 'addr'
@@ -253,7 +237,7 @@ uint32_t icache_access(uint32_t addr)
   Block *p = icache[index].front;
 
   for(int i=0; i<icache[index].size; i++){
-    if((p->val & icache_tag_mask) == tag){ // Hit
+    if(p->val == tag){ // Hit
       Block *b = setPopIndex(&icache[index], i); // Get the hit block
       setPush(&icache[index],  b); // move to end of set queue
       return icacheHitTime;
@@ -291,7 +275,7 @@ uint32_t dcache_access(uint32_t addr)
   Block *p = dcache[index].front;
 
   for(int i=0; i<dcache[index].size; i++){
-    if((p->val & dcache_tag_mask) == tag){ // Hit
+    if(p->val == tag){ // Hit
       Block *b = setPopIndex(&dcache[index], i); // Get the hit block
       setPush(&dcache[index],  b); // move to end of set queue
       return dcacheHitTime;
@@ -330,7 +314,7 @@ l2cache_access(uint32_t addr)
   Block *p = l2cache[index].front;
 
   for(int i=0; i<l2cache[index].size; i++){
-    if((p->val & l2cache_tag_mask) == tag){ // Hit
+    if(p->val == tag){ // Hit
       Block *b = setPopIndex(&l2cache[index], i); // Get the hit block
       setPush(&l2cache[index],  b); // move to end of set queue
       return l2cacheHitTime;
@@ -343,8 +327,7 @@ l2cache_access(uint32_t addr)
   // l2cache[index][rand()%icacheAssoc] = tag; // random replacement
   // Miss replacement - LRU
   Block *b = createBlock(tag);
-
-  printf("%d", l2cache[index].size);
+  
   if(l2cache[index].size == l2cacheAssoc) // set filled, replace LRU (front of set queue)
     setPop(&l2cache[index]);
   setPush(&l2cache[index],  b);
