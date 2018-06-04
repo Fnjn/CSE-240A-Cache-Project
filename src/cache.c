@@ -14,9 +14,9 @@
 //
 // TODO:Student Information
 //
-const char *studentName = "Fanjin Zeng";
-const char *studentID   = "A53238021";
-const char *email       = "f1zeng@ucsd.edu";
+const char *studentName = "Yue Zhao/Fanjin Zeng";
+const char *studentID   = "A53250901/A53238021";
+const char *email       = "yuz105@eng.ucsd.edu/f1zeng@ucsd.edu";
 
 //------------------------------------//
 //        Cache Configuration         //
@@ -84,14 +84,17 @@ Block* createBlock(uint32_t val)
   return b;
 }
 
+// Didn't check the set size, assume checked by the caller
 void setPush(Set* s,  Block *b)
 {
+  // If set not empty, append to the back
   if(s->size)
   {
     s->back->next = b;
     b->prev = s->back;
     s->back = b;
   }
+  // If empty, initialize set
   else
   {
     s->front = b;
@@ -100,7 +103,9 @@ void setPush(Set* s,  Block *b)
   (s->size)++;
 }
 
+// Pop front
 void setPop(Set* s){
+  // If empty, do nothing
   if(!s->size)
     return;
 
@@ -115,7 +120,8 @@ void setPop(Set* s){
 }
 
 Block* setPopIndex(Set* s, int index){
-  if(index > s->size)
+  // Invalid Pop index
+  if(index > s->size || index<0)
     return NULL;
 
   Block *p = s->front;
@@ -146,6 +152,7 @@ Block* setPopIndex(Set* s, int index){
   p->prev = NULL;
 
   (s->size)--;
+  //Block ownership transfer to caller
   return p;
 }
 
@@ -209,30 +216,71 @@ init_cache()
     l2cache[i].front = NULL;
     l2cache[i].back = NULL;
   }
-
     offset_size = (uint32_t)log2(blocksize);
+    offset_size += ((1<<offset_size)==blocksize)? 0 : 1;
     offset_mask = (1 << offset_size) - 1;
 
 
     icache_index_size = (uint32_t)log2(icacheSets);
+    icache_index_size += ((1<<icache_index_size)==icacheSets)? 0 : 1;
     dcache_index_size = (uint32_t)log2(dcacheSets);
+    dcache_index_size += ((1<<dcache_index_size)==dcacheSets)? 0 : 1;
     l2cache_index_size = (uint32_t)log2(l2cacheSets);
+    l2cache_index_size += ((1<<l2cache_index_size)==l2cacheSets)? 0 : 1;
 
     icache_index_mask = ((1 << icache_index_size) - 1) << offset_size;
     dcache_index_mask = ((1 << dcache_index_size) - 1) << offset_size;
     l2cache_index_mask = ((1 << l2cache_index_size) - 1) << offset_size;
 }
 
+void icacheInvalidate(uint32_t addr){
+  uint32_t offset = addr & offset_mask;
+  uint32_t index = (addr & icache_index_mask) >> offset_size;
+  uint32_t tag = addr >> (icache_index_size + offset_size);
+
+  Block *p = icache[index].front;
+
+  for(int i=0; i<icache[index].size; i++){
+    if(p->val == tag){ // Find it
+      Block *b = setPopIndex(&icache[index], i); //Invalidate it
+      free(b);
+      return;
+    }
+    p = p->next;
+  }
+}
+void dcacheInvalidate(uint32_t addr){
+  uint32_t offset = addr & offset_mask;
+  uint32_t index = (addr & dcache_index_mask) >> offset_size;
+  uint32_t tag = addr >> (dcache_index_size + offset_size);
+
+  Block *p = dcache[index].front;
+
+  for(int i=0; i<dcache[index].size; i++){
+    if(p->val == tag){ // Find it
+      Block *b = setPopIndex(&dcache[index], i); // Invalidate it
+      free(b);
+      return;
+    }
+    p = p->next;
+  }
+}
 // Perform a memory access through the icache interface for the address 'addr'
 // Return the access time for the memory operation
 //
 uint32_t icache_access(uint32_t addr)
 {
+  // If not intialized, bypass the L1
+  if(icacheSets==0){
+    return l2cache_access(addr);
+  }
+  // If intialized, go below
   icacheRefs += 1;
 
+  // Memory address should be ||addr|| == ||tag||index||offset||
   uint32_t offset = addr & offset_mask;
   uint32_t index = (addr & icache_index_mask) >> offset_size;
-  uint32_t tag = addr >> (icacheSets + offset_size);
+  uint32_t tag = addr >> (icache_index_size + offset_size);
 
   Block *p = icache[index].front;
 
@@ -247,6 +295,9 @@ uint32_t icache_access(uint32_t addr)
 
   icacheMisses += 1;
 
+  uint32_t penalty = l2cache_access(addr);
+  icachePenalties += penalty;
+
   // icache[index][rand()%icacheAssoc] = tag; // random replacement
   // Miss replacement - LRU
   Block *b = createBlock(tag);
@@ -254,9 +305,6 @@ uint32_t icache_access(uint32_t addr)
   if(icache[index].size == icacheAssoc) // set filled, replace LRU (front of set queue)
     setPop(&icache[index]);
   setPush(&icache[index],  b);
-
-  uint32_t penalty = l2cache_access(addr);
-  icachePenalties += penalty;
 
   return penalty + icacheHitTime;
 }
@@ -266,11 +314,16 @@ uint32_t icache_access(uint32_t addr)
 //
 uint32_t dcache_access(uint32_t addr)
 {
+  // If not intialized, bypass the L1
+  if(dcacheSets==0){
+    return l2cache_access(addr);
+  }
+  // If intialized, go below
   dcacheRefs += 1;
 
   uint32_t offset = addr & offset_mask;
   uint32_t index = (addr & dcache_index_mask) >> offset_size;
-  uint32_t tag = addr >> (dcacheSets + offset_size);
+  uint32_t tag = addr >> (dcache_index_size + offset_size);
 
   Block *p = dcache[index].front;
 
@@ -285,6 +338,10 @@ uint32_t dcache_access(uint32_t addr)
 
   dcacheMisses += 1;
 
+
+  uint32_t penalty = l2cache_access(addr);
+  dcachePenalties += penalty;
+
   // dcache[index][rand()%icacheAssoc] = tag; // random replacement
   // Miss replacement - LRU
   Block *b = createBlock(tag);
@@ -292,9 +349,6 @@ uint32_t dcache_access(uint32_t addr)
   if(dcache[index].size == dcacheAssoc) // set filled, replace LRU (front of set queue)
     setPop(&dcache[index]);
   setPush(&dcache[index],  b);
-
-  uint32_t penalty = l2cache_access(addr);
-  dcachePenalties += penalty;
 
   return penalty + dcacheHitTime;
 }
@@ -305,11 +359,16 @@ uint32_t dcache_access(uint32_t addr)
 uint32_t
 l2cache_access(uint32_t addr)
 {
+  // If not intialized, bypass the L2
+  if(l2cacheSets==0){
+    return memspeed;
+  }
+  // If intialized, go below
   l2cacheRefs += 1;
 
   uint32_t offset = addr & offset_mask;
   uint32_t index = (addr & l2cache_index_mask) >> offset_size;
-  uint32_t tag = addr >> (l2cacheSets + offset_size);
+  uint32_t tag = addr >> (l2cache_index_size + offset_size);
 
   Block *p = l2cache[index].front;
 
@@ -328,8 +387,16 @@ l2cache_access(uint32_t addr)
   // Miss replacement - LRU
   Block *b = createBlock(tag);
   
-  if(l2cache[index].size == l2cacheAssoc) // set filled, replace LRU (front of set queue)
+  if(l2cache[index].size == l2cacheAssoc){ // set filled, replace LRU (front of set queue)
+    if(inclusive){
+      //Invalidate L1
+      uint32_t swapoutBlockAddr = (((l2cache[index].front->val)<<l2cache_index_size) + index)<<offset_size;
+      icacheInvalidate(swapoutBlockAddr);
+      dcacheInvalidate(swapoutBlockAddr);
+    }
     setPop(&l2cache[index]);
+    // else suppose it's a non-inclusive cache
+  }
   setPush(&l2cache[index],  b);
 
   l2cachePenalties += memspeed;
